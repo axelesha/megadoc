@@ -1,28 +1,41 @@
-const fs = require("fs");
-const path = require("path");
+//-------------------------------------------------------------------------------
+// commands/index.js
+// âûçîâ utils/loadCommands.js äëÿ îáõîäà
+// ïî ðåêóðñèè âñåõ êîìàíä è èõ ðåãèñòðàöèÿ
+//-------------------------------------------------------------------------------
+const fs = require('fs');
+const path = require('path');
 
 module.exports = (bot, pool) => {
-  // ÐŸÐ¾Ð»ÑƒÑ‡Ð°ÐµÐ¼ Ð¿ÑƒÑ‚ÑŒ Ðº Ð´Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€Ð¸Ð¸ Ñ ÐºÐ¾Ð¼Ð°Ð½Ð´Ð°Ð¼Ð¸
-  const commandsDir = path.join(__dirname);
-
-  // Ð§Ð¸Ñ‚Ð°ÐµÐ¼ Ð²ÑÐµ Ñ„Ð°Ð¹Ð»Ñ‹ Ð² Ð´Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€Ð¸Ð¸
-  fs.readdirSync(commandsDir).forEach((file) => {
-    // ÐŸÑ€Ð¾Ð¿ÑƒÑÐºÐ°ÐµÐ¼ index.js Ð¸ Ñ„Ð°Ð¹Ð»Ñ‹, ÐºÐ¾Ñ‚Ð¾Ñ€Ñ‹Ðµ Ð½Ðµ ÑÐ²Ð»ÑÑŽÑ‚ÑÑ JavaScript-Ñ„Ð°Ð¹Ð»Ð°Ð¼Ð¸
-    if (file === "index.js" || !file.endsWith(".js")) return;
-
-    // ÐŸÐ¾Ð»ÑƒÑ‡Ð°ÐµÐ¼ Ð¸Ð¼Ñ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ‹ Ð¸Ð· Ð¸Ð¼ÐµÐ½Ð¸ Ñ„Ð°Ð¹Ð»Ð° (Ð±ÐµÐ· Ñ€Ð°ÑÑˆÐ¸Ñ€ÐµÐ½Ð¸Ñ .js)
-    const commandName = path.basename(file, ".js");
-
-    try {
-      // Ð˜Ð¼Ð¿Ð¾Ñ€Ñ‚Ð¸Ñ€ÑƒÐµÐ¼ Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚Ñ‡Ð¸Ðº ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ‹
-      const commandHandler = require(`./${file}`);
-
-      // Ð ÐµÐ³Ð¸ÑÑ‚Ñ€Ð¸Ñ€ÑƒÐµÐ¼ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñƒ
-      commandHandler(bot, pool);
-
-      console.log(`âœ… ÐšÐ¾Ð¼Ð°Ð½Ð´Ð° ${commandName} ÑƒÑÐ¿ÐµÑˆÐ½Ð¾ Ð·Ð°Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð°`);
-    } catch (error) {
-      console.error(`âŒ ÐžÑˆÐ¸Ð±ÐºÐ° Ð¿Ñ€Ð¸ Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°Ñ†Ð¸Ð¸ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ‹ ${commandName}:`, error);
-    }
-  });
+    // Çàãðóæàåì âñå ôàéëû êîìàíä èç òåêóùåé äèðåêòîðèè
+    const files = fs.readdirSync(__dirname);
+    
+    files.forEach(file => {
+        if (file !== 'index.js' && file.endsWith('.js')) {
+            const command = require(path.join(__dirname, file));
+            if (typeof command === 'function') {
+                command(bot, pool);
+            }
+        }
+    });
+    
+    // Ðåêóðñèâíî çàãðóæàåì êîìàíäû èç ïîääèðåêòîðèé
+    const directories = files.filter(file => 
+        fs.statSync(path.join(__dirname, file)).isDirectory()
+    );
+    
+    directories.forEach(dir => {
+        const dirPath = path.join(__dirname, dir);
+        const dirFiles = fs.readdirSync(dirPath);
+        
+        dirFiles.forEach(file => {
+            if (file.endsWith('.js')) {
+                const command = require(path.join(dirPath, file));
+                if (typeof command === 'function') {
+                    command(bot, pool);
+                }
+            }
+        });
+    });
 };
+//-------------------------------------------------------------------------------
