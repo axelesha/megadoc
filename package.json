@@ -1,8 +1,28 @@
 {
+  "name": "megadoc-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for MegaDoc project",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js",
+    "init-db": "node -e \"require('./db_init.sql')\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
   "dependencies": {
-    "dotenv": "^17.2.1",
-    "mysql2": "^3.14.3",
     "telegraf": "^4.16.3",
-    "axios": "^1.6.0"
-  }
+    "mysql2": "^3.14.3",
+    "axios": "^1.6.0",
+    "dotenv": "^17.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "megadoc"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
