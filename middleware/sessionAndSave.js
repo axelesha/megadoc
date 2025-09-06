@@ -153,7 +153,7 @@ module.exports.factory = (bot, pool) => {
                         ctx.session.current_branch_id = branchResult.insertId;
                         
                         // Повторяем попытку сохранения сообщения
-                        await pool.execute(
+                        const [retryResult] = await pool.execute(
                             `INSERT INTO messages (message_id, chat_id, branch_id, user_id, content, detected_language) 
                              VALUES (?, ?, ?, ?, ?, ?)`,
                             [
@@ -166,7 +166,7 @@ module.exports.factory = (bot, pool) => {
                             ]
                         );
                         ctx.state = ctx.state || {};
-                        ctx.state.message_db_id = branchResult.insertId;
+                        ctx.state.message_db_id = retryResult.insertId;
                     } catch (retryError) {
                         console.error('Error retrying message save:', retryError);
                     }

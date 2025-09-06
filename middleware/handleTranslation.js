@@ -85,11 +85,12 @@ module.exports.factory = (bot, pool) => {
                 );
                 
                 // Сохраняем перевод
+                const dbMessageId = existingMessage[0].id;
                 await pool.execute(
                     `INSERT INTO message_translations (message_id, language, translated_text) 
                      VALUES (?, ?, ?) 
                      ON DUPLICATE KEY UPDATE translated_text = ?`,
-                    [ctx.message.message_id, userLanguage, translatedText, translatedText]
+                    [dbMessageId, userLanguage, translatedText, translatedText]
                 );
 
                 // Обновляем сессию пользователя
