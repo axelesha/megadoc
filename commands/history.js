@@ -71,7 +71,7 @@ module.exports = registerCommand(['history', 'история'], async (ctx) => {
         }
         
         const historyTitle = await getTranslation('message_history', userLanguage);
-        await ctx.replyWithMarkdown(`**${historyTitle}**:\n\n${historyText}`);
+        await ctx.reply(`${historyTitle}:\n\n${historyText}`);
         
     } catch (error) {
         console.error('History command error:', error);
