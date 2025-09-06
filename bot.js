@@ -44,7 +44,7 @@ async function main() {
   
   const sessionAndSaveMiddleware = require('./middleware/sessionAndSave')(bot, pool);
   const handleTranslationMiddleware = require('./middleware/handleTranslation')(bot, pool);
-  const aiResponseMiddleware = require('./middleware/aiResponse')(bot, pool);
+  const aiResponseMiddleware = require('./middleware/aiResponse').factory(bot, pool);
   
   bot.use(session());
   bot.use(sessionAndSaveMiddleware);
@@ -52,7 +52,6 @@ async function main() {
   bot.use(aiResponseMiddleware);
   
   bot.command('start', handleStart);
-  bot.command('tags', require('./commands/tags')(pool));
   
   setupCommands(bot, pool);
   bot.catch(handleError);
