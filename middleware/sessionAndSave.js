@@ -34,19 +34,32 @@ module.exports.factory = (bot, pool) => {
             ctx.session = {};
         }
 
+        // Save chat and user to database (must precede branch creation due to FK)
+        try {
+            await pool.execute(
+                'INSERT IGNORE INTO chats (id, type, title) VALUES (?, ?, ?)',
+                [chatId, ctx.chat.type, ctx.chat.title || ctx.chat.first_name]
+            );
+
+            await pool.execute(
+                'INSERT IGNORE INTO users (id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
+                [userId, ctx.from.username, ctx.from.first_name, ctx.from.last_name || '']
+            );
+        } catch (error) {
+            console.error('Error saving chat/user:', error);
+        }
+
         // Initialize current branch for this chat (default to main branch with ID 1)
         if (!ctx.session.current_branch_id) {
-            // Получаем ID основной ветки или создаем ее, если не существует
             try {
                 const [mainBranch] = await pool.execute(
                     'SELECT id FROM branches WHERE chat_id = ? AND name = ?',
                     [chatId, 'main']
                 );
-                
+
                 if (mainBranch.length > 0) {
                     ctx.session.current_branch_id = mainBranch[0].id;
                 } else {
-                    // Создаем основную ветку, если она не существует
                     const [result] = await pool.execute(
                         'INSERT INTO branches (chat_id, name, parent_id) VALUES (?, ?, ?)',
                         [chatId, 'main', 0]
@@ -87,20 +100,7 @@ module.exports.factory = (bot, pool) => {
             }
         }
 
-        // Save chat and user to database
-        try {
-            await pool.execute(
-                'INSERT IGNORE INTO chats (id, type, title) VALUES (?, ?, ?)',
-                [chatId, ctx.chat.type, ctx.chat.title || ctx.chat.first_name]
-            );
-
-            await pool.execute(
-                'INSERT IGNORE INTO users (id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
-                [userId, ctx.from.username, ctx.from.first_name, ctx.from.last_name || '']
-            );
-        } catch (error) {
-            console.error('Error saving chat/user:', error);
-        }
+        // Language preferences and message saving follow after branch init
 
         // Save message to database (if not a command)
         if (ctx.message.text && !ctx.message.text.startsWith('/')) {
@@ -121,6 +121,12 @@ module.exports.factory = (bot, pool) => {
                         detectedLanguage
                     ]
                 );
+
+                // Expose saved message DB id for downstream middlewares
+                if (result && result.insertId) {
+                    ctx.state = ctx.state || {};
+                    ctx.state.message_db_id = result.insertId;
+                }
 
                 // Extract and save tags
                 if (result && result.insertId) {
@@ -159,6 +165,8 @@ module.exports.factory = (bot, pool) => {
                                 detectedLanguage || 'en'
                             ]
                         );
+                        ctx.state = ctx.state || {};
+                        ctx.state.message_db_id = branchResult.insertId;
                     } catch (retryError) {
                         console.error('Error retrying message save:', retryError);
                     }

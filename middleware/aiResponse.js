@@ -60,12 +60,15 @@ module.exports.factory = (bot, pool) => {
             // Генерируем ответ
             const aiResponse = await deepSeek.generateResponse(history);
             
-            // Сохраняем взаимодействие с AI
-            await pool.execute(
-                `INSERT INTO ai_interactions (message_id, prompt, response, tokens_used) 
-                 VALUES (?, ?, ?, ?)`,
-                [ctx.message.message_id, ctx.message.text, aiResponse.content, aiResponse.usage.total_tokens]
-            );
+            // Сохраняем взаимодействие с AI, связывая с ID сообщения в БД
+            const messageDbId = ctx.state?.message_db_id;
+            if (messageDbId) {
+                await pool.execute(
+                    `INSERT INTO ai_interactions (message_id, prompt, response, tokens_used) 
+                     VALUES (?, ?, ?, ?)`,
+                    [messageDbId, ctx.message.text, aiResponse.content, aiResponse.usage.total_tokens]
+                );
+            }
 
             // Обновляем использование токенов
             await deepSeek.updateTokenUsage(
