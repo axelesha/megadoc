@@ -2,12 +2,23 @@
 const NodeCache = require('node-cache');
 const { getTranslation } = require('../utils/translations');
 
+// Регистрируем команду в глобальном реестре для корректного логирования
+if (!global.__registeredCommands) {
+    global.__registeredCommands = new Set();
+}
+global.__registeredCommands.add('structure');
+
 const treeCache = new NodeCache({ stdTTL: 300, checkperiod: 320 });
 
 module.exports = (bot, pool) => {
     // Основная команда структуры
     bot.command('structure', async (ctx) => {
         try {
+            // Помечаем, что команда обрабатывается
+            ctx.state = ctx.state || {};
+            ctx.state.commandHandled = true;
+            ctx.state.commandName = 'structure';
+
             const userLanguage = ctx.session?.language || 'en';
             const chatId = ctx.chat.id;
             const userId = ctx.from.id;
@@ -55,17 +66,24 @@ async function formatTreeText(branches, expandedBranches, userLanguage, parentId
     const children = branches.filter(branch => branch.parent_id === parentId);
     let text = await getTranslation('branch_structure', userLanguage) + '\n\n';
 
-    children.forEach(branch => {
+    for (const branch of children) {
         const isExpanded = expandedBranches.includes(branch.id);
         const icon = isExpanded ? '📂' : '📁';
         const indent = '│   '.repeat(level);
-        
+
         text += `${indent}${icon} ${branch.name}\n`;
-        
+
         if (isExpanded) {
-            text += formatTreeText(branches, expandedBranches, userLanguage, branch.id, level + 1);
+            text += await formatTreeText(branches, expandedBranches, userLanguage, branch.id, level + 1);
         }
-    });
+    }
 
     return text;
+}
+
+function buildTreeButtons(branches, expandedBranches, userLanguage) {
+    // Минимальная клавиатура: кнопка обновления дерева
+    return [
+        [Markup.button.callback('🔄', 'structure_refresh')]
+    ];
 }
