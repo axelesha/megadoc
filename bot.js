@@ -19,9 +19,14 @@ if (!BOT_TOKEN) {
 
 async function handleStart(ctx) {
   try {
+    ctx.state = ctx.state || {};
+    ctx.state.commandHandled = true;
+    ctx.state.commandName = 'start';
+    console.log(`[CMD] Executing: /start user=${ctx.from?.id} chat=${ctx.chat?.id}`);
     const userLanguage = ctx.session.language || 'en';
     const greeting = await getTranslation('greeting', userLanguage);
     await ctx.reply(greeting);
+    console.log('[CMD] Completed: /start');
   } catch (error) {
     logger.error(`Error in start command: ${error.message}`);
   }
@@ -41,7 +46,40 @@ async function main() {
   await loadTranslations(pool);
   
   const bot = new Telegraf(BOT_TOKEN);
+  const me = await bot.telegram.getMe();
+  const botUsername = me?.username || '';
   
+  // Логирование входящих команд и причин пропуска неизвестных
+  bot.use(async (ctx, next) => {
+    const text = ctx.message?.text;
+    if (typeof text === 'string' && text.startsWith('/')) {
+      const firstToken = text.slice(1).split(' ')[0];
+      const [cmd, mention] = firstToken.split('@');
+      logger.info(`Incoming command: /${cmd}${mention ? '@' + mention : ''} from user=${ctx.from?.id} chat=${ctx.chat?.id}`);
+    }
+
+    await next();
+
+    if (typeof text === 'string' && text.startsWith('/')) {
+      const firstToken = text.slice(1).split(' ')[0];
+      const [cmd, mention] = firstToken.split('@');
+      const mentionLower = mention?.toLowerCase();
+      const botLower = botUsername?.toLowerCase() || '';
+      const addressedToAnotherBot = !!mentionLower && mentionLower !== botLower;
+      const isKnown = (global.__registeredCommands?.has(cmd)) || cmd === 'start';
+
+      if (!ctx.state?.commandHandled) {
+        if (addressedToAnotherBot) {
+          logger.info(`Command not executed: addressed to another bot /${cmd}@${mention} user=${ctx.from?.id} chat=${ctx.chat?.id}`);
+        } else if (!isKnown) {
+          logger.info(`Command not executed: unknown command /${cmd} user=${ctx.from?.id} chat=${ctx.chat?.id}`);
+        } else {
+          logger.info(`Command not executed: handler not invoked /${cmd} user=${ctx.from?.id} chat=${ctx.chat?.id}`);
+        }
+      }
+    }
+  });
+
   const sessionAndSaveMiddleware = require('./middleware/sessionAndSave')(bot, pool);
   const handleTranslationMiddleware = require('./middleware/handleTranslation')(bot, pool);
   const aiResponseMiddleware = require('./middleware/aiResponse').factory(bot, pool);
