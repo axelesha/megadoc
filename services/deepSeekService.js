@@ -15,27 +15,42 @@ class DeepSeekService {
             throw new Error('DeepSeek API key not configured');
         }
 
-        try {
-            const response = await axios.post(this.baseURL, {
-                model: "deepseek-chat",
-                messages: messages,
-                max_tokens: maxTokens,
-                temperature: 0.7
-            }, {
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 30000
-            });
+        const maxAttempts = 2;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const response = await axios.post(this.baseURL, {
+                    model: "deepseek-chat",
+                    messages: messages,
+                    max_tokens: maxTokens,
+                    temperature: 0.7
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${this.apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: attempt === 1 ? 30000 : 45000
+                });
 
-            return {
-                content: response.data.choices[0].message.content,
-                usage: response.data.usage || { total_tokens: 0 }
-            };
-        } catch (error) {
-            console.error('DeepSeek API error:', error.response?.data || error.message);
-            throw new Error(`DeepSeek API request failed: ${error.message}`);
+                return {
+                    content: response.data.choices[0].message.content,
+                    usage: response.data.usage || { total_tokens: 0 }
+                };
+            } catch (error) {
+                const isTimeout = error.code === 'ECONNABORTED' || /aborted|timeout/i.test(error.message || '');
+                if (isTimeout && attempt < maxAttempts) {
+                    await new Promise(r => setTimeout(r, 500 * attempt));
+                    continue;
+                }
+                if (isTimeout) {
+                    // Возвращаем дружелюбный ответ вместо ошибки для таймаутов
+                    return {
+                        content: '⏳ The AI service is taking longer than expected. Please try again.',
+                        usage: { total_tokens: 0 }
+                    };
+                }
+                console.error('DeepSeek API error:', error.response?.data || error.message);
+                throw new Error(`DeepSeek API request failed: ${error.message}`);
+            }
         }
     }
 
