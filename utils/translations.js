@@ -83,11 +83,6 @@ class TranslationService {
 let translationServiceInstance = null;
 
 module.exports = {
-    init: (pool) => {
-        translationServiceInstance = new TranslationService(pool);
-        return translationServiceInstance;
-    },
-    
     getTranslation: (key, language) => {
         if (!translationServiceInstance) {
             console.error('Translation service not initialized!');
@@ -104,7 +99,9 @@ module.exports = {
         return translationServiceInstance.addTranslation(languageCode, key, text);
     },
     
-    loadTranslations: () => {
+    loadTranslations: (pool) => {
+        translationServiceInstance = new TranslationService(pool);
+        
         if (!translationServiceInstance) {
             console.error('Translation service not initialized!');
             return false;

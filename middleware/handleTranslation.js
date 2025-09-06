@@ -103,4 +103,6 @@ module.exports.factory = (bot, pool) => {
         await next();
     };
 };
+
+module.exports = module.exports.factory;
 //---------------------------------------------------------
