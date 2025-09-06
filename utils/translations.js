@@ -1,117 +1,114 @@
-﻿//-------------------------------------------------------------
-// utils/translations.js
-//-------------------------------------------------------------
-const translationsCache = new Map();
-/**
- * Load all translations from database
- * @param {Pool} pool - MySQL connection pool
- */
-async function loadTranslations(pool) {
-  try {
-    const [translations] = await pool.execute(
-      'SELECT message_key, language_code, translation FROM message_translations'
-    );
-    
-    translationsCache.clear();
-    
-    translations.forEach(({ message_key, language_code, translation }) => {
-      if (!translationsCache.has(message_key)) {
-        translationsCache.set(message_key, new Map());
-      }
-      translationsCache.get(message_key).set(language_code, translation);
-    });
-    
-    console.log(`✓ Loaded ${translations.length} translations`);
-  } catch (error) {
-    console.error('Error loading translations:', error);
-  }
+﻿const NodeCache = require('node-cache');
+
+// Кэш переводов (обновляется каждые 5 минут)
+const translationsCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+
+class TranslationService {
+    constructor(pool) {
+        this.pool = pool;
+    }
+
+    // Загрузка всех переводов в кэш
+    async loadTranslations() {
+        try {
+            const [translations] = await this.pool.execute(`
+                SELECT language_code, translation_key, translation_text 
+                FROM translations
+            `);
+
+            const translationsByLang = {};
+            translations.forEach(row => {
+                if (!translationsByLang[row.language_code]) {
+                    translationsByLang[row.language_code] = {};
+                }
+                translationsByLang[row.language_code][row.translation_key] = row.translation_text;
+            });
+
+            // Сохраняем в кэш
+            for (const [lang, translations] of Object.entries(translationsByLang)) {
+                translationsCache.set(lang, translations);
+            }
+
+            console.log('✓ Translations loaded from database');
+        } catch (error) {
+            console.error('Error loading translations:', error);
+        }
+    }
+
+    // Получение перевода
+    async getTranslation(key, language = 'en') {
+        // Пытаемся получить из кэша
+        const langTranslations = translationsCache.get(language) || {};
+        let translation = langTranslations[key];
+
+        // Если перевод не найден, пробуем английскую версию
+        if (!translation && language !== 'en') {
+            const enTranslations = translationsCache.get('en') || {};
+            translation = enTranslations[key];
+        }
+
+        // Если всё еще не найден, возвращаем ключ
+        return translation || key;
+    }
+
+    // Добавление нового перевода
+    async addTranslation(languageCode, key, text) {
+        try {
+            await this.pool.execute(`
+                INSERT INTO translations (language_code, translation_key, translation_text)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE translation_text = VALUES(translation_text)
+            `, [languageCode, key, text]);
+
+            // Обновляем кэш
+            const langTranslations = translationsCache.get(languageCode) || {};
+            langTranslations[key] = text;
+            translationsCache.set(languageCode, langTranslations);
+
+            console.log(`✓ Translation added: ${languageCode}.${key}`);
+            return true;
+        } catch (error) {
+            console.error('Error adding translation:', error);
+            return false;
+        }
+    }
+
+    // Получение всех переводов для языка
+    async getTranslationsForLanguage(languageCode) {
+        return translationsCache.get(languageCode) || {};
+    }
 }
 
-/**
- * Get translation for a message key in specified language
- * @param {string} messageKey - Translation key
- * @param {string} languageCode - Language code (en, ru, etc.)
- * @param {Object} params - Parameters to replace in translation
- * @returns {string} Translated message or original key if not found
- */
-async function getTranslation(messageKey, languageCode = 'en', params = {}) {
-  let translation = messageKey;
-  
-  // Try to get translation for specified language
-  if (translationsCache.has(messageKey)) {
-    const languageTranslations = translationsCache.get(messageKey);
-    
-    // First try requested language
-    if (languageTranslations.has(languageCode)) {
-      translation = languageTranslations.get(languageCode);
-    }
-    // Fallback to English
-    else if (languageTranslations.has('en')) {
-      translation = languageTranslations.get('en');
-    }
-    // Fallback to any available translation
-    else if (languageTranslations.size > 0) {
-      translation = languageTranslations.values().next().value;
-    }
-  }
-  
-  // Replace parameters in translation
-  Object.keys(params).forEach(key => {
-    translation = translation.replace(new RegExp(`{${key}}`, 'g'), params[key]);
-  });
-  
-  return translation;
-}
-
-/**
- * Get all available languages from database
- * @param {Pool} pool - MySQL connection pool
- * @returns {Array} Array of language codes
- */
-async function getAvailableLanguages(pool) {
-  try {
-    const [languages] = await pool.execute(
-      'SELECT code FROM languages ORDER BY code'
-    );
-    return languages.map(lang => lang.code);
-  } catch (error) {
-    console.error('Error getting available languages:', error);
-    return ['en']; // Fallback to English
-  }
-}
-
-/**
- * Add new translation to database and cache
- * @param {Pool} pool - MySQL connection pool
- * @param {string} messageKey - Translation key
- * @param {string} languageCode - Language code
- * @param {string} translation - Translated text
- */
-async function addTranslation(pool, messageKey, languageCode, translation) {
-  try {
-    await pool.execute(
-      'INSERT INTO message_translations (message_key, language_code, translation) VALUES (?, ?, ?) ' +
-      'ON DUPLICATE KEY UPDATE translation = VALUES(translation)',
-      [messageKey, languageCode, translation]
-    );
-    
-    // Update cache
-    if (!translationsCache.has(messageKey)) {
-      translationsCache.set(messageKey, new Map());
-    }
-    translationsCache.get(messageKey).set(languageCode, translation);
-    
-    return true;
-  } catch (error) {
-    console.error('Error adding translation:', error);
-    return false;
-  }
-}
+// Создаем экземпляр и экспортируем
+let translationServiceInstance = null;
 
 module.exports = {
-  loadTranslations,
-  getTranslation,
-  getAvailableLanguages,
-  addTranslation
+    init: (pool) => {
+        translationServiceInstance = new TranslationService(pool);
+        return translationServiceInstance;
+    },
+    
+    getTranslation: (key, language) => {
+        if (!translationServiceInstance) {
+            console.error('Translation service not initialized!');
+            return key;
+        }
+        return translationServiceInstance.getTranslation(key, language);
+    },
+    
+    addTranslation: (languageCode, key, text) => {
+        if (!translationServiceInstance) {
+            console.error('Translation service not initialized!');
+            return false;
+        }
+        return translationServiceInstance.addTranslation(languageCode, key, text);
+    },
+    
+    loadTranslations: () => {
+        if (!translationServiceInstance) {
+            console.error('Translation service not initialized!');
+            return false;
+        }
+        return translationServiceInstance.loadTranslations();
+    }
 };
-//-------------------------------------------------------------

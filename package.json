@@ -1,19 +1,20 @@
 {
   "name": "megadoc-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for MegaDoc project",
+  "description": "MegaDoc Telegram Bot for knowledge management",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
     "dev": "nodemon bot.js",
-    "init-db": "node -e \"require('./db_init.sql')\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "telegraf": "^4.16.3",
-    "mysql2": "^3.14.3",
-    "axios": "^1.6.0",
-    "dotenv": "^17.2.1"
+    "dotenv": "^16.0.0",
+    "mysql2": "^3.6.0",
+    "telegraf": "^4.12.2",
+    "axios": "^1.4.0",
+    "node-cron": "^3.0.2",
+    "node-cache": "^5.1.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
@@ -21,8 +22,9 @@
   "keywords": [
     "telegram",
     "bot",
-    "megadoc"
+    "knowledge",
+    "management"
   ],
-  "author": "Your Name",
+  "author": "Andrey Ulanov & Alex Axel",
   "license": "MIT"
 }

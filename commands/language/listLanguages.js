@@ -6,15 +6,23 @@ const { getTranslation } = require('../../utils/translations');
 const translationService = require('../../services/translationService');
 
 module.exports = registerCommand(['languages', 'языки'], async (ctx) => {
-    const userLanguage = ctx.session.language || 'en';
+    const userLanguage = ctx.session?.language || 'en';
     
     try {
         const supportedLanguages = translationService.getSupportedLanguages();
         
         let message = await getTranslation('supported_languages', userLanguage) + ':\n\n';
         
+        // Добавляем emoji для каждого языка
+        const languageEmojis = {
+            'en': '🇺🇸', 'ru': '🇷🇺', 'es': '🇪🇸', 'fr': '🇫🇷', 
+            'de': '🇩🇪', 'zh': '🇨🇳', 'ja': '🇯🇵', 'ko': '🇰🇷',
+            'ar': '🇸🇦', 'hi': '🇮🇳', 'pt': '🇵🇹'
+        };
+        
         supportedLanguages.forEach(lang => {
-            message += `• ${lang}\n`;
+            const emoji = languageEmojis[lang] || '🌐';
+            message += `${emoji} ${lang.toUpperCase()} - ${await getTranslation('language_' + lang, userLanguage)}\n`;
         });
         
         message += '\n' + await getTranslation('set_language_usage', userLanguage);
@@ -23,8 +31,8 @@ module.exports = registerCommand(['languages', 'языки'], async (ctx) => {
         
     } catch (error) {
         console.error('List languages error:', error);
-        const errorMessage = await getTranslation('error_listing_languages', userLanguage);
-        await ctx.reply(errorMessage);
+        const errorMessage = await getTranslation('error_occurred', userLanguage);
+        await ctx.reply(`${errorMessage}: ${error.message}`);
     }
 });
 //-------------------------------------------------------

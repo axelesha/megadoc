@@ -1,39 +1,26 @@
-//-----------------------------------------------------------------
 // commands/admin/translations.js
-//-----------------------------------------------------------------
-const registerCommand = require('../../../utils/registerCommand');
-const { addTranslation, getTranslation } = require('../../../utils/translations');
+const registerCommand = require('../../utils/registerCommand');
+const { addTranslation, getTranslation } = require('../../utils/translations');
 
-module.exports = registerCommand(['add_translation', '‰Ó·‡‚ËÚ¸_ÔÂÂ‚Ó‰'], async (ctx) => {
-    const args = ctx.message.text.split(' ');
-    const userLanguage = ctx.session.language || 'en';
-    
-    if (args.length < 4) {
-        const usageMessage = await getTranslation('add_translation_usage', userLanguage);
-        return ctx.reply(usageMessage);
+module.exports = registerCommand(['add_translation'], async (ctx) => {
+    // –ü—Ä–æ–≤–µ—Ä—è–µ–º –ø—Ä–∞–≤–∞ –∞–¥–º–∏–Ω–∏—Å—Ç—Ä–∞—Ç–æ—Ä–∞
+    if (ctx.from.id !== ADMIN_USER_ID) {
+        return ctx.reply('Access denied');
     }
-    
-    const messageKey = args[1];
-    const languageCode = args[2];
-    const translation = args.slice(3).join(' ');
-    
-    try {
-        const success = await addTranslation(ctx.pool, messageKey, languageCode, translation);
-        
-        if (success) {
-            const successMessage = await getTranslation('translation_added', userLanguage);
-            await ctx.reply(successMessage
-                .replace('{key}', messageKey)
-                .replace('{language}', languageCode)
-            );
-        } else {
-            const errorMessage = await getTranslation('error_adding_translation', userLanguage);
-            await ctx.reply(errorMessage);
-        }
-    } catch (error) {
-        console.error('Add translation error:', error);
-        const errorMessage = await getTranslation('error_adding_translation', userLanguage);
-        await ctx.reply(errorMessage);
+
+    const args = ctx.message.text.split(' ');
+    if (args.length < 4) {
+        return ctx.reply('Usage: /add_translation <lang> <key> <text>');
+    }
+
+    const lang = args[1];
+    const key = args[2];
+    const text = args.slice(3).join(' ');
+
+    const success = await addTranslation(lang, key, text);
+    if (success) {
+        await ctx.reply(`Translation added: ${lang}.${key} = ${text}`);
+    } else {
+        await ctx.reply('Error adding translation');
     }
 });
-//-----------------------------------------------------------------

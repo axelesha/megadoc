@@ -4,62 +4,79 @@
 const registerCommand = require('../utils/registerCommand');
 const { getTranslation } = require('../utils/translations');
 const translationService = require('../services/translationService');
-/**
- * Handler for history command with translation
- */
-module.exports = (bot, pool) => {
-  const handleHistory = async (ctx) => {
+
+module.exports = registerCommand(['history', 'Ð¸ÑÑ‚Ð¾Ñ€Ð¸Ñ'], async (ctx) => {
     const chatId = ctx.chat.id;
     const userId = ctx.from.id;
-    const userLanguage = ctx.session.language || 'en';
+    const userLanguage = ctx.session?.language || 'en';
+    const branchId = ctx.session?.current_branch_id || 0;
 
     try {
-      // Ïîëó÷àåì èñòîðèþ ñîîáùåíèé
-      const [messages] = await pool.execute(
-        `SELECT m.id, m.user_id, m.content, m.detected_language, u.first_name
-         FROM messages m
-         JOIN users u ON m.user_id = u.id
-         WHERE m.chat_id = ?
-         ORDER BY m.timestamp DESC
-         LIMIT 20`,
-        [chatId]
-      );
-      
-      if (messages.length === 0) {
-        const noMessages = await getTranslation('no_messages_found', userLanguage);
-        return ctx.reply(noMessages);
-      }
-      
-      // Ïîëó÷àåì íàñòðîéêè ïîëüçîâàòåëÿ
-      const preferences = await translationService.getUserLanguagePreference(pool, userId);
-      
-      // Ïåðåâîäèì êàæäîå ñîîáùåíèå ïðè íåîáõîäèìîñòè
-      let historyText = '';
-      for (const message of messages.reverse()) {
-        let content = message.content;
+        // ÐŸÐ¾Ð»ÑƒÑ‡Ð°ÐµÐ¼ Ð¸ÑÑ‚Ð¾Ñ€Ð¸ÑŽ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹
+        const [messages] = await ctx.pool.execute(
+            `SELECT m.id, m.user_id, m.content, m.detected_language, 
+                    u.first_name, u.username, m.created_at
+             FROM messages m
+             JOIN users u ON m.user_id = u.id
+             WHERE m.chat_id = ? AND m.branch_id = ?
+             ORDER BY m.created_at DESC
+             LIMIT 20`,
+            [chatId, branchId]
+        );
         
-        if (preferences.auto_translate && message.detected_language !== preferences.preferred_language) {
-          content = await translationService.translateText(
-            content,
-            preferences.preferred_language,
-            message.detected_language
-          );
+        if (messages.length === 0) {
+            const noMessages = await getTranslation('no_messages_found', userLanguage);
+            return ctx.reply(noMessages);
         }
         
-        historyText += `**${message.first_name}**: ${content}\n\n`;
-      }
-      
-      const historyTitle = await getTranslation('message_history', userLanguage);
-      await ctx.replyWithMarkdown(`**${historyTitle}**:\n\n${historyText}`);
-      
+        // ÐŸÐ¾Ð»ÑƒÑ‡Ð°ÐµÐ¼ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ
+        const preferences = await translationService.getUserLanguagePreference(ctx.pool, userId, chatId);
+        
+        // Ð¤Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÐµÐ¼ Ð¸ÑÑ‚Ð¾Ñ€Ð¸ÑŽ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹
+        let historyText = '';
+        
+        for (const message of messages.reverse()) {
+            let content = message.content;
+            let displayName = message.first_name;
+            
+            if (message.username) {
+                displayName = `@${message.username}`;
+            }
+            
+            // ÐŸÐµÑ€ÐµÐ²Ð¾Ð´ Ð¿Ñ€Ð¸ Ð½ÐµÐ¾Ð±Ñ…Ð¾Ð´Ð¸Ð¼Ð¾ÑÑ‚Ð¸
+            if (preferences.auto_translate && message.detected_language !== preferences.preferred_language) {
+                try {
+                    content = await translationService.translateText(
+                        content,
+                        preferences.preferred_language,
+                        message.detected_language
+                    );
+                } catch (translationError) {
+                    console.error('Translation error:', translationError);
+                    // ÐžÑÑ‚Ð°Ð²Ð»ÑÐµÐ¼ Ð¾Ñ€Ð¸Ð³Ð¸Ð½Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ñ‚ÐµÐºÑÑ‚ Ð² ÑÐ»ÑƒÑ‡Ð°Ðµ Ð¾ÑˆÐ¸Ð±ÐºÐ¸ Ð¿ÐµÑ€ÐµÐ²Ð¾Ð´Ð°
+                }
+            }
+            
+            // ÐžÐ±Ñ€ÐµÐ·Ð°ÐµÐ¼ Ð´Ð»Ð¸Ð½Ð½Ñ‹Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ
+            if (content.length > 200) {
+                content = content.substring(0, 200) + '...';
+            }
+            
+            const time = new Date(message.created_at).toLocaleTimeString('ru-RU', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            historyText += `ðŸ•’ ${time} **${displayName}**: ${content}\n\n`;
+        }
+        
+        const historyTitle = await getTranslation('message_history', userLanguage);
+        await ctx.replyWithMarkdown(`**${historyTitle}**:\n\n${historyText}`);
+        
     } catch (error) {
-      console.error('History command error:', error);
-      const errorMessage = await getTranslation('error_retrieving_history', userLanguage);
-      await ctx.reply(errorMessage);
+        console.error('History command error:', error);
+        const errorMessage = await getTranslation('error_retrieving_history', userLanguage);
+        await ctx.reply(`${errorMessage}: ${error.message}`);
     }
-  };
-
-  registerCommand(bot, ['history', 'èñòîðèÿ'], handleHistory);
-};
+});
 //---------------------------------------------------------------
-

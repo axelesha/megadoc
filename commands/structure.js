@@ -1,59 +1,71 @@
-﻿//---------------------------------------------------------------------------
-// commands/structure.js
-// команда вывода структура чата
-//---------------------------------------------------------------------------
-const registerCommand = require('../utils/registerCommand');
+﻿const { Markup } = require('telegraf');
+const NodeCache = require('node-cache');
 const { getTranslation } = require('../utils/translations');
-/**
- * Handler for structure command
- * Shows the branch structure for the current chat using dynamic translations
- */
+
+const treeCache = new NodeCache({ stdTTL: 300, checkperiod: 320 });
+
 module.exports = (bot, pool) => {
-  const handleStructure = async (ctx) => {
-    const chatId = ctx.chat.id;
-    const userLanguage = ctx.session.language || 'en';
+    // Основная команда структуры
+    bot.command('structure', async (ctx) => {
+        try {
+            const userLanguage = ctx.session?.language || 'en';
+            const chatId = ctx.chat.id;
+            const userId = ctx.from.id;
+            const cacheKey = `tree_${chatId}_${userId}`;
 
-    try {
-      // Get branches for this specific chat
-      const [branches] = await pool.execute(
-        'SELECT id, name, parent_id FROM branches WHERE chat_id = ? ORDER BY parent_id, sort_order',
-        [chatId]
-      );
-      
-      // Build branch tree
-      let treeText = '';
-      
-      // Function to build tree structure
-      const buildTree = (parentId = null, level = 0) => {
-        const children = branches.filter(branch => branch.parent_id === parentId);
-        
-        for (const branch of children) {
-          treeText += `${'  '.repeat(level)}• ${branch.name} (${branch.id})\n`;
-          buildTree(branch.id, level + 1);
+            let treeState = treeCache.get(cacheKey) || {
+                expandedBranches: [],
+                currentPage: 0
+            };
+
+            const [branches] = await pool.execute(
+                `SELECT id, name, parent_id, description 
+                 FROM branches 
+                 WHERE chat_id = ? AND is_visible = TRUE 
+                 ORDER BY parent_id, sort_order, name`,
+                [chatId]
+            );
+
+            const treeButtons = buildTreeButtons(branches, treeState.expandedBranches, userLanguage);
+            const messageText = await formatTreeText(branches, treeState.expandedBranches, userLanguage);
+
+            const keyboard = Markup.inlineKeyboard(treeButtons);
+            
+            if (ctx.callbackQuery) {
+                await ctx.editMessageText(messageText, keyboard);
+                await ctx.answerCbQuery();
+            } else {
+                await ctx.reply(messageText, keyboard);
+            }
+
+            treeCache.set(cacheKey, treeState);
+
+        } catch (error) {
+            console.error('Structure command error:', error);
+            const errorMessage = await getTranslation('error_occurred', ctx.session?.language || 'en');
+            await ctx.reply(errorMessage);
         }
-      };
-      
-      buildTree();
-      
-      // Send message with dynamic translations
-      if (treeText) {
-        const structureMessage = await getTranslation('structure_response', userLanguage);
-        await ctx.replyWithMarkdown(`${structureMessage}:\n\n${treeText}`);
-      } else {
-        const noBranchesMessage = await getTranslation('no_branches_found', userLanguage);
-        const createBranchHint = await getTranslation('use_new_branch_hint', userLanguage);
-        await ctx.reply(`${noBranchesMessage}. ${createBranchHint}`);
-      }
-      
-    } catch (error) {
-      console.error('Structure command error:', error);
-      const errorMessage = await getTranslation('error_retrieving_structure', userLanguage);
-      await ctx.reply(errorMessage);
-    }
-  };
+    });
 
-  // Register with English keywords only
-  registerCommand(bot, ['structure'], handleStructure, pool);
+    // ... остальные обработчики с использованием getTranslation
 };
-//--------------------------------------------------------------------------
 
+// Обновленные функции для поддержки переводов
+async function formatTreeText(branches, expandedBranches, userLanguage, parentId = 0, level = 0) {
+    const children = branches.filter(branch => branch.parent_id === parentId);
+    let text = await getTranslation('branch_structure', userLanguage) + '\n\n';
+
+    children.forEach(branch => {
+        const isExpanded = expandedBranches.includes(branch.id);
+        const icon = isExpanded ? '📂' : '📁';
+        const indent = '│   '.repeat(level);
+        
+        text += `${indent}${icon} ${branch.name}\n`;
+        
+        if (isExpanded) {
+            text += formatTreeText(branches, expandedBranches, userLanguage, branch.id, level + 1);
+        }
+    });
+
+    return text;
+}

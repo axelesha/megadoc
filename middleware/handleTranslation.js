@@ -1,66 +1,106 @@
 //---------------------------------------------------------
 // middleware/handleTranslation.js
-
+//---------------------------------------------------------
 const translationService = require('../services/translationService');
 
-module.exports = (bot, pool) => async (ctx, next) => {
-    if (!ctx.message || !ctx.message.text || ctx.message.text.startsWith('/')) {
-        return next();
+// РњРµС‚Р°РґР°РЅРЅС‹Рµ РјРѕРґСѓР»СЏ
+module.exports.moduleName = 'handleTranslation';
+module.exports.dependencies = ['sessionAndSave'];
+
+module.exports.factory = (bot, pool) => {
+    if (global.moduleRegistry && global.moduleRegistry.isModuleLoaded('handleTranslation')) {
+        return (ctx, next) => next();
     }
 
-    const chatId = ctx.chat.id;
-    const userId = ctx.from.id;
-    const originalText = ctx.message.text;
+    // РљСЌС€ РґР»СЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёС… РїСЂРµРґРїРѕС‡С‚РµРЅРёР№
+    const userPrefsCache = new Map();
 
-    try {
-        // Определяем язык исходного сообщения
-        const detectedLanguage = await translationService.detectLanguage(originalText);
-        
-        // Обновляем язык сообщения в БД
-        await pool.execute(
-            'UPDATE messages SET detected_language = ? WHERE message_id = ? AND chat_id = ?',
-            [detectedLanguage, ctx.message.message_id, chatId]
-        );
+    return async (ctx, next) => {
+        // РџСЂРѕРїСѓСЃРєР°РµРј РЅРµ С‚РµРєСЃС‚РѕРІС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ Рё РєРѕРјР°РЅРґС‹
+        if (!ctx.message || !ctx.message.text || ctx.message.text.startsWith('/')) {
+            return next();
+        }
 
-        // Получаем всех пользователей в чате с их настройками
-        const [users] = await pool.execute(
-            `SELECT u.id, 
-             COALESCE(ulp.preferred_language, 'en') as preferred_language,
-             COALESCE(ulp.auto_translate, true) as auto_translate
-             FROM users u
-             LEFT JOIN user_language_preferences ulp ON u.id = ulp.user_id AND ulp.chat_id = ?
-             WHERE EXISTS (
-             SELECT 1 FROM messages WHERE chat_id = ? AND user_id = u.id
-            )`,
-            [chatId, chatId]
-        );
+        console.log('HandleTranslation middleware executed');
         
-        // Для каждого пользователя создаем переведенную версию
-        for (const user of users) {
-            let translatedText = originalText;
+        const chatId = ctx.chat.id;
+        const userId = ctx.from.id;
+        const originalText = ctx.message.text;
+
+        try {
+            // РЎРЅР°С‡Р°Р»Р° РїСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ СЃСѓС‰РµСЃС‚РІСѓРµС‚ РІ Р‘Р”
+            const [existingMessage] = await pool.execute(
+                'SELECT id FROM messages WHERE message_id = ? AND chat_id = ?',
+                [ctx.message.message_id, chatId]
+            );
+
+            if (existingMessage.length === 0) {
+                console.log('Message not found in DB, skipping translation');
+                return next();
+            }
+
+            // РћРїСЂРµРґРµР»СЏРµРј СЏР·С‹Рє СЃРѕРѕР±С‰РµРЅРёСЏ
+            const detectedLanguage = await translationService.detectLanguage(originalText);
             
-            // Если у пользователя включен авто-перевод и язык отличается
-            if (user.auto_translate && user.preferred_language !== detectedLanguage) {
-                translatedText = await translationService.translateText(
+            // РћР±РЅРѕРІР»СЏРµРј СЏР·С‹Рє СЃРѕРѕР±С‰РµРЅРёСЏ РІ Р‘Р”
+            await pool.execute(
+                'UPDATE messages SET detected_language = ? WHERE message_id = ? AND chat_id = ?',
+                [detectedLanguage, ctx.message.message_id, chatId]
+            );
+
+            // РџРѕР»СѓС‡Р°РµРј РЅР°СЃС‚СЂРѕР№РєРё СЏР·С‹РєР° С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ (СЃ РєСЌС€РёСЂРѕРІР°РЅРёРµРј)
+            const cacheKey = `${userId}_${chatId}`;
+            let userPrefs = userPrefsCache.get(cacheKey);
+            
+            if (!userPrefs) {
+                const [prefs] = await pool.execute(
+                    `SELECT preferred_language, auto_translate 
+                     FROM user_language_preferences 
+                     WHERE user_id = ? AND chat_id = ?`,
+                    [userId, chatId]
+                );
+
+                if (prefs.length > 0) {
+                    userPrefs = prefs[0];
+                } else {
+                    // РЎРѕР·РґР°РµРј Р·Р°РїРёСЃСЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ
+                    await pool.execute(
+                        'INSERT INTO user_language_preferences (user_id, chat_id, preferred_language, auto_translate) VALUES (?, ?, ?, ?)',
+                        [userId, chatId, 'en', true]
+                    );
+                    userPrefs = { preferred_language: 'en', auto_translate: true };
+                }
+                userPrefsCache.set(cacheKey, userPrefs);
+            }
+
+            const userLanguage = userPrefs.preferred_language;
+            const autoTranslate = userPrefs.auto_translate;
+
+            // Р•СЃР»Рё РЅСѓР¶РЅРѕ РїРµСЂРµРІРѕРґРёС‚СЊ Рё СЏР·С‹Рє РѕС‚Р»РёС‡Р°РµС‚СЃСЏ
+            if (autoTranslate && userLanguage !== detectedLanguage) {
+                const translatedText = await translationService.translateText(
                     originalText, 
-                    user.preferred_language, 
+                    userLanguage, 
                     detectedLanguage
                 );
                 
-                // Сохраняем перевод в БД
+                // РЎРѕС…СЂР°РЅСЏРµРј РїРµСЂРµРІРѕРґ
                 await pool.execute(
                     `INSERT INTO message_translations (message_id, language, translated_text) 
                      VALUES (?, ?, ?) 
                      ON DUPLICATE KEY UPDATE translated_text = ?`,
-                    [ctx.message.message_id, user.preferred_language, translatedText, translatedText]
+                    [ctx.message.message_id, userLanguage, translatedText, translatedText]
                 );
+
+                // РћР±РЅРѕРІР»СЏРµРј СЃРµСЃСЃРёСЋ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
+                ctx.session.language = userLanguage;
             }
+            
+        } catch (error) {
+            console.error('Error in translation middleware:', error);
         }
         
-    } catch (error) {
-        console.error('Error in translation middleware:', error);
-    }
-
-    return next();
+        await next();
+    };
 };
 //---------------------------------------------------------

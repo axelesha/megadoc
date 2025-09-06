@@ -2,66 +2,90 @@
 // middleware/aiResponse.js
 //-----------------------------------------------------------------
 const DeepSeekService = require('../services/deepSeekService');
-const deepSeek = new DeepSeekService();
+const { getTranslation } = require('../utils/translations');
 
-module.exports = (pool) => async (ctx, next) => {
-    if (ctx.message && ctx.message.text && !ctx.message.text.startsWith('/')) {
+// РњРµС‚Р°РґР°РЅРЅС‹Рµ РјРѕРґСѓР»СЏ
+module.exports.moduleName = 'aiResponse';
+module.exports.dependencies = ['sessionAndSave', 'handleTranslation'];
+
+module.exports.factory = (bot, pool) => {
+    if (global.moduleRegistry && global.moduleRegistry.isModuleLoaded('aiResponse')) {
+        return (ctx, next) => next();
+    }
+
+    const deepSeek = new DeepSeekService();
+
+    return async (ctx, next) => {
+        console.log('AIResponse middleware executed');
+        
+        // РџСЂРѕРїСѓСЃРєР°РµРј РєРѕРјР°РЅРґС‹ Рё РЅРµ-С‚РµРєСЃС‚РѕРІС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
+        if (!ctx.message || !ctx.message.text || ctx.message.text.startsWith('/')) {
+            return next();
+        }
+
         try {
-            // Получаем историю сообщений ветки
+            const today = new Date().toISOString().split('T')[0];
+            
+            // РџСЂРѕРІРµСЂСЏРµРј Р»РёРјРёС‚С‹ РїРµСЂРµРґ Р·Р°РїСЂРѕСЃРѕРј
+            const limits = await deepSeek.checkLimits(ctx.chat.id, ctx.from.id, today, pool);
+            if (limits.exceeded) {
+                const limitExceededText = await getTranslation('limit_exceeded', ctx.session?.language || 'en');
+                await ctx.reply(limitExceededText);
+                return next();
+            }
+
+            // РџРѕР»СѓС‡Р°РµРј РёСЃС‚РѕСЂРёСЋ СЃРѕРѕР±С‰РµРЅРёР№ РґР»СЏ РєРѕРЅС‚РµРєСЃС‚Р°
             const [messages] = await pool.execute(
-                `SELECT m.content, u.first_name 
+                `SELECT m.content, m.detected_language, u.first_name 
                  FROM messages m 
                  JOIN users u ON m.user_id = u.id 
-                 WHERE m.chat_id = ? AND m.branch_id = ? 
+                 WHERE m.chat_id = ? AND m.branch_id = ?
                  ORDER BY m.created_at DESC 
                  LIMIT 10`,
-                [ctx.chat.id, ctx.session.current_branch]
+                [ctx.chat.id, ctx.session.current_branch_id || 0]
             );
-            
-            // Форматируем историю для AI
+
+            // Р¤РѕСЂРјРёСЂСѓРµРј РёСЃС‚РѕСЂРёСЋ РґР»СЏ AI
             const history = messages.reverse().map(msg => ({
-                role: 'user',
-                content: `${msg.first_name}: ${msg.content}`
+                role: "user",
+                content: msg.content
             }));
-            
-            // Добавляем текущее сообщение
+
+            // Р”РѕР±Р°РІР»СЏРµРј С‚РµРєСѓС‰РµРµ СЃРѕРѕР±С‰РµРЅРёРµ
             history.push({
-                role: 'user',
-                content: `${ctx.from.first_name}: ${ctx.message.text}`
+                role: "user",
+                content: ctx.message.text
             });
+
+            // Р“РµРЅРµСЂРёСЂСѓРµРј РѕС‚РІРµС‚
+            const aiResponse = await deepSeek.generateResponse(history);
             
-            // Получаем ответ от AI
-            const response = await deepSeek.generateResponse(history);
-            
-            // Сохраняем ответ в БД
-            const [savedMessage] = await pool.execute(
-                `INSERT INTO messages (message_id, chat_id, branch_id, user_id, content, detected_language) 
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                 [
-                     ctx.message.message_id + 1, // ID для ответа
-                     ctx.chat.id,
-                     ctx.session.current_branch,
-                     (await ctx.telegram.getMe()).id, // Получаем ID бота динамически
-                     response,
-                     ctx.session.language || 'en'
-                 ]
-            );
-            
-            // Сохраняем взаимодействие с AI
+            // РЎРѕС…СЂР°РЅСЏРµРј РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёРµ СЃ AI
             await pool.execute(
-                `INSERT INTO ai_interactions (message_id, prompt, response) 
-                 VALUES (?, ?, ?)`,
-                [savedMessage.insertId, ctx.message.text, response]
+                `INSERT INTO ai_interactions (message_id, prompt, response, tokens_used) 
+                 VALUES (?, ?, ?, ?)`,
+                [ctx.message.message_id, ctx.message.text, aiResponse.content, aiResponse.usage.total_tokens]
+            );
+
+            // РћР±РЅРѕРІР»СЏРµРј РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ С‚РѕРєРµРЅРѕРІ
+            await deepSeek.updateTokenUsage(
+                ctx.chat.id, 
+                ctx.from.id, 
+                today, 
+                aiResponse.usage.total_tokens,
+                pool
             );
             
-            // Отправляем пользователю
-            await ctx.reply(response);
+            // РћС‚РїСЂР°РІР»СЏРµРј РѕС‚РІРµС‚
+            await ctx.reply(aiResponse.content);
+            
         } catch (error) {
             console.error('AI Middleware Error:', error);
-            const errorMessage = await require('../utils/translations').getTranslation('error_occurred', ctx.session.language || 'en');
+            const errorMessage = await getTranslation('error_occurred', ctx.session?.language || 'en');
             await ctx.reply(`${errorMessage}: ${error.message}`);
         }
-    }
-    await next();
+        
+        await next();
+    };
 };
 //-----------------------------------------------------------------

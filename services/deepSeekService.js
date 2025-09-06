@@ -1,57 +1,79 @@
-//-----------------------------------------------------------
-// service/deepSeekService.js
-//-----------------------------------------------------------
+// services/deepSeekService.js
 const axios = require('axios');
 
 class DeepSeekService {
     constructor() {
         this.apiKey = process.env.DEEPSEEK_API_KEY;
         this.baseURL = 'https://api.deepseek.com/v1/chat/completions';
+        if (!this.apiKey) {
+            console.error('DEEPSEEK_API_KEY is not defined in environment variables');
+        }
     }
 
-    async generateResponse(messages) {
+    async generateResponse(messages, maxTokens = 1000) {
+        if (!this.apiKey) {
+            throw new Error('DeepSeek API key not configured');
+        }
+
         try {
             const response = await axios.post(this.baseURL, {
                 model: "deepseek-chat",
                 messages: messages,
-                temperature: 0.7,
-                max_tokens: 2000
+                max_tokens: maxTokens,
+                temperature: 0.7
             }, {
                 headers: {
                     'Authorization': `Bearer ${this.apiKey}`,
                     'Content-Type': 'application/json'
                 },
-                timeout: 30000 // 30 секунд таймаут
+                timeout: 30000
             });
 
-            return response.data.choices[0].message.content;
+            return {
+                content: response.data.choices[0].message.content,
+                usage: response.data.usage || { total_tokens: 0 }
+            };
         } catch (error) {
-            console.error('DeepSeek API Error:', error.response?.data || error.message);
-            
-            // Возвращаем заглушку в случае ошибки
-            if (error.response?.status === 429) {
-                return "Извините, превышен лимит запросов. Попробуйте позже.";
-            }
-            
-            throw new Error('AI service unavailable');
+            console.error('DeepSeek API error:', error.response?.data || error.message);
+            throw new Error(`DeepSeek API request failed: ${error.message}`);
         }
     }
 
-    // Новый метод для проверки доступности API
-    async checkAvailability() {
+    async checkLimits(chatId, userId, date, pool) {
         try {
-            await axios.get('https://api.deepseek.com/v1/models', {
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`
-                }
-            });
-            return true;
+            const dailyLimit = 100000;
+            const [rows] = await pool.execute(
+                'SELECT tokens_used FROM daily_token_usage WHERE chat_id = ? AND user_id = ? AND date = ?',
+                [chatId, userId, date]
+            );
+
+            let used = 0;
+            if (rows.length > 0) {
+                used = rows[0].tokens_used;
+            }
+
+            const remaining = Math.max(0, dailyLimit - used);
+            const exceeded = used >= dailyLimit;
+
+            return { used, remaining, exceeded, limit: dailyLimit };
         } catch (error) {
-            console.error('DeepSeek API unavailable:', error.message);
-            return false;
+            console.error('Error checking token limits:', error);
+            return { used: 0, remaining: dailyLimit, exceeded: false, limit: dailyLimit };
+        }
+    }
+
+    async updateTokenUsage(chatId, userId, date, tokensUsed, pool) {
+        try {
+            const query = `
+                INSERT INTO daily_token_usage (chat_id, user_id, date, tokens_used) 
+                VALUES (?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE tokens_used = tokens_used + ?
+            `;
+            await pool.execute(query, [chatId, userId, date, tokensUsed, tokensUsed]);
+        } catch (error) {
+            console.error('Error updating token usage:', error);
         }
     }
 }
 
 module.exports = DeepSeekService;
-//-----------------------------------------------------------

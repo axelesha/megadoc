@@ -1,12 +1,15 @@
-
+//-------------------------------------------------------
+// commands/language/setLanguage.js
+//-------------------------------------------------------
 const registerCommand = require('../../utils/registerCommand');
 const { getTranslation } = require('../../utils/translations');
 const translationService = require('../../services/translationService');
 
-module.exports = registerCommand(['set_language', 'язык'], async (ctx) => {
+module.exports = registerCommand(['set_language', 'СЏР·С‹Рє'], async (ctx) => {
     const args = ctx.message.text.split(' ');
     const userId = ctx.from.id;
-    const currentLanguage = ctx.session.language || 'en';
+    const chatId = ctx.chat.id;
+    const currentLanguage = ctx.session?.language || 'en';
 
     try {
         if (args.length < 2) {
@@ -14,31 +17,35 @@ module.exports = registerCommand(['set_language', 'язык'], async (ctx) => {
             return ctx.reply(usageMessage);
         }
 
-        const langCode = args[1].toLowerCase();
+        const langCode = args[1].toLowerCase().trim();
         
-        // Проверяем поддерживается ли язык
-        const supportedLanguages = ['en', 'ru', 'es', 'fr', 'de', 'zh', 'ja', 'ko'];
+        // РџСЂРѕРІРµСЂСЏРµРј РїРѕРґРґРµСЂР¶РєСѓ СЏР·С‹РєР°
+        const supportedLanguages = translationService.getSupportedLanguages();
         if (!supportedLanguages.includes(langCode)) {
             const errorMessage = await getTranslation('language_not_supported', currentLanguage);
             return ctx.reply(errorMessage);
         }
 
-        // Обновляем настройки пользователя
+        // РћР±РЅРѕРІР»СЏРµРј РЅР°СЃС‚СЂРѕР№РєРё СЏР·С‹РєР°
         await ctx.pool.execute(
-            'INSERT INTO user_language_preferences (user_id, chat_id, preferred_language) VALUES (?, ?, ?) ' +
-            'ON DUPLICATE KEY UPDATE preferred_language = VALUES(preferred_language)',
-            [userId, ctx.chat.id, langCode]
+            `INSERT INTO user_language_preferences (user_id, chat_id, preferred_language, auto_translate) 
+             VALUES (?, ?, ?, true) 
+             ON DUPLICATE KEY UPDATE 
+                 preferred_language = VALUES(preferred_language),
+                 updated_at = NOW()`,
+            [userId, chatId, langCode]
         );
         
-        // Обновляем сессию
+        // РћР±РЅРѕРІР»СЏРµРј СЃРµСЃСЃРёСЋ
         ctx.session.language = langCode;
         
-        const successMessage = await getTranslation('language_set', currentLanguage);
-        await ctx.reply(successMessage.replace('{language}', langCode));
+        const successMessage = await getTranslation('language_set', langCode);
+        await ctx.reply(successMessage.replace('{language}', langCode.toUpperCase()));
         
     } catch (error) {
         console.error('Set language error:', error);
         const errorMessage = await getTranslation('error_setting_language', currentLanguage);
-        await ctx.reply(errorMessage);
+        await ctx.reply(`${errorMessage}: ${error.message}`);
     }
 });
+//-------------------------------------------------------
