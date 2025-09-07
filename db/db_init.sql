@@ -209,3 +209,10 @@ INSERT INTO translations (language_code, translation_key, translation_text) VALU
 
 
 SELECT 'Database initialization completed successfully!' AS status;
+
+-- Добавляем поле access_type, если оно еще не существует
+ALTER TABLE branches 
+ADD COLUMN IF NOT EXISTS access_type ENUM('public', 'protected', 'private') DEFAULT 'public';
+
+-- Обновляем существующие записи, если нужно
+UPDATE branches SET access_type = 'public' WHERE access_type IS NULL;
